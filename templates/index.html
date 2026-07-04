@@ -1,0 +1,1247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DeliveryBot — Smart QR Dispatch System</title>
+  <meta name="description" content="Real-time smart delivery bot dashboard with live QR code scanning via ESP32 camera stream."/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #060b14;
+      --bg2: #0d1726;
+      --bg3: #101e30;
+      --card: rgba(13, 23, 38, 0.85);
+      --border: rgba(56, 139, 253, 0.18);
+      --border-bright: rgba(56, 139, 253, 0.45);
+      --accent: #38bdf8;
+      --accent2: #818cf8;
+      --green: #4ade80;
+      --orange: #fb923c;
+      --red: #f87171;
+      --text: #e2eaf5;
+      --text-muted: #6b8099;
+      --glow: 0 0 30px rgba(56, 189, 248, 0.2);
+      --glow-green: 0 0 20px rgba(74, 222, 128, 0.35);
+      --radius: 16px;
+      --radius-sm: 10px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ─── ANIMATED BG GRID ─── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: 0;
+      background-image:
+        linear-gradient(rgba(56,139,253,.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(56,139,253,.04) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+    }
+    body::after {
+      content: '';
+      position: fixed; inset: 0; z-index: 0;
+      background: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(56,189,248,.12), transparent),
+                  radial-gradient(ellipse 60% 40% at 80% 100%, rgba(129,140,248,.08), transparent);
+      pointer-events: none;
+    }
+
+    .layout { position: relative; z-index: 1; display: flex; flex-direction: column; min-height: 100vh; }
+
+    /* ─── TOP NAV ─── */
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 20px;
+      height: 46px;
+      background: rgba(6,11,20,.8);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; z-index: 100;
+    }
+    .logo {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .logo-icon {
+      width: 28px; height: 28px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 7px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; box-shadow: 0 0 14px rgba(56,189,248,.4);
+    }
+    .logo-text { font-size: 16px; font-weight: 800; letter-spacing: -.3px; }
+    .logo-text span { color: var(--accent); }
+
+    .nav-status {
+      display: flex; align-items: center; gap: 20px;
+    }
+    #conn-badge {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 14px; border-radius: 999px;
+      font-size: 12px; font-weight: 600; letter-spacing: .4px;
+      border: 1px solid;
+      transition: all .4s ease;
+    }
+    #conn-badge.online {
+      color: var(--green); border-color: rgba(74,222,128,.35);
+      background: rgba(74,222,128,.08);
+    }
+    #conn-badge.offline {
+      color: var(--red); border-color: rgba(248,113,113,.35);
+      background: rgba(248,113,113,.08);
+    }
+    .pulse-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: currentColor;
+      animation: pulseDot 1.8s ease-in-out infinite;
+    }
+    @keyframes pulseDot {
+      0%,100% { opacity: 1; transform: scale(1); }
+      50% { opacity: .4; transform: scale(.6); }
+    }
+
+    .nav-time {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px; color: var(--text-muted);
+      min-width: 60px; text-align: right;
+    }
+
+    /* ─── MAIN GRID ─── */
+    main {
+      display: grid;
+      grid-template-columns: 1fr 310px;
+      grid-template-rows: auto 1fr;
+      gap: 10px;
+      padding: 10px 16px 10px;
+      flex: 1;
+      height: calc(100vh - 46px - 32px);
+      overflow: hidden;
+    }
+
+    /* ─── STATS ROW ─── */
+    .stats-row {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+    }
+
+    .stat-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 14px;
+      display: flex; flex-direction: row; align-items: center; gap: 10px;
+      backdrop-filter: blur(12px);
+      position: relative; overflow: hidden;
+      transition: transform .25s, border-color .25s, box-shadow .25s;
+    }
+    .stat-card:hover {
+      transform: translateY(-2px);
+      border-color: var(--border-bright);
+      box-shadow: var(--glow);
+    }
+    .stat-card::before {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0; height: 2px;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      opacity: 0; transition: opacity .3s;
+    }
+    .stat-card:hover::before { opacity: 1; }
+    .stat-icon {
+      font-size: 16px; width: 32px; height: 32px; flex-shrink: 0;
+      background: rgba(56,189,248,.1); border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .stat-text { flex: 1; min-width: 0; }
+    .stat-label { font-size: 10px; color: var(--text-muted); font-weight: 500; text-transform: uppercase; letter-spacing: .5px; }
+    .stat-value { font-size: 20px; font-weight: 800; line-height: 1.1; }
+    .stat-sub { font-size: 9px; color: var(--text-muted); }
+
+    /* ─── VIDEO PANEL ─── */
+    .video-panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      backdrop-filter: blur(12px);
+      overflow: hidden;
+      display: flex; flex-direction: column;
+      box-shadow: 0 4px 20px rgba(0,0,0,.4);
+      min-height: 0;
+    }
+    .panel-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .panel-title {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12px; font-weight: 700; letter-spacing: .3px;
+    }
+    .panel-title-icon { font-size: 13px; }
+    .badge {
+      font-size: 9px; font-weight: 700; letter-spacing: .5px;
+      padding: 2px 6px; border-radius: 5px;
+      background: rgba(56,189,248,.12); color: var(--accent);
+      border: 1px solid rgba(56,189,248,.25);
+      text-transform: uppercase;
+    }
+
+    .video-wrap {
+      position: relative;
+      background: #000610;
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+    }
+    #live-feed {
+      width: auto; height: auto;
+      max-width: 100%;
+      max-height: 260px;
+      display: block;
+      object-fit: contain;
+    }
+    .video-overlay {
+      position: absolute; inset: 0;
+      pointer-events: none;
+    }
+    /* Scanning line animation */
+    .scan-line {
+      position: absolute; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      opacity: 0;
+      animation: scanLine 3s ease-in-out infinite;
+    }
+    @keyframes scanLine {
+      0% { top: 0%; opacity: 0; }
+      5% { opacity: .8; }
+      95% { opacity: .8; }
+      100% { top: 100%; opacity: 0; }
+    }
+    /* Corner brackets */
+    .corner { position: absolute; width: 24px; height: 24px; }
+    .corner::before, .corner::after { content: ''; position: absolute; background: var(--accent); }
+    .corner--tl { top: 16px; left: 16px; }
+    .corner--tl::before { top: 0; left: 0; width: 2px; height: 100%; }
+    .corner--tl::after  { top: 0; left: 0; width: 100%; height: 2px; }
+    .corner--tr { top: 16px; right: 16px; }
+    .corner--tr::before { top: 0; right: 0; width: 2px; height: 100%; }
+    .corner--tr::after  { top: 0; right: 0; width: 100%; height: 2px; }
+    .corner--bl { bottom: 16px; left: 16px; }
+    .corner--bl::before { bottom: 0; left: 0; width: 2px; height: 100%; }
+    .corner--bl::after  { bottom: 0; left: 0; width: 100%; height: 2px; }
+    .corner--br { bottom: 16px; right: 16px; }
+    .corner--br::before { bottom: 0; right: 0; width: 2px; height: 100%; }
+    .corner--br::after  { bottom: 0; right: 0; width: 100%; height: 2px; }
+
+    .no-feed {
+      display: flex; flex-direction: column; align-items: center; gap: 12px;
+      color: var(--text-muted); font-size: 13px;
+    }
+    .no-feed-icon { font-size: 48px; animation: pulse 2s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+
+    /* ─── QR DETECTION ALERT ─── */
+    .qr-alert {
+      margin: 0 10px 8px;
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      background: rgba(74,222,128,.07);
+      border: 1px solid rgba(74,222,128,.3);
+      display: flex; align-items: flex-start; gap: 8px;
+      animation: slideIn .4s ease;
+      transition: all .4s ease;
+    }
+    .qr-alert.empty {
+      background: rgba(107,128,153,.07);
+      border-color: rgba(107,128,153,.2);
+    }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(-6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .qr-alert-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+    .qr-alert-content { flex: 1; min-width: 0; }
+    .qr-alert-label { font-size: 9px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase; color: var(--green); margin-bottom: 2px; }
+    .qr-alert.empty .qr-alert-label { color: var(--text-muted); }
+    .qr-alert-data {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px; font-weight: 600;
+      color: var(--text);
+      word-break: break-all;
+    }
+    .qr-alert-time { font-size: 9px; color: var(--text-muted); margin-top: 2px; }
+
+    /* ─── RIGHT SIDEBAR ─── */
+    .sidebar {
+      display: flex; flex-direction: column; gap: 8px;
+      min-height: 0; overflow-y: auto;
+    }
+    .sidebar::-webkit-scrollbar { width: 3px; }
+    .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    .history-panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      backdrop-filter: blur(12px);
+      overflow: hidden;
+      flex: 1;
+      display: flex; flex-direction: column;
+      min-height: 0;
+    }
+
+    .history-list {
+      flex: 1; overflow-y: auto; padding: 4px;
+    }
+    .history-list::-webkit-scrollbar { width: 3px; }
+    .history-list::-webkit-scrollbar-track { background: transparent; }
+    .history-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    .history-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 8px;
+      border-radius: 7px;
+      cursor: pointer;
+      transition: background .2s;
+      border-bottom: 1px solid rgba(56,139,253,.06);
+      animation: fadeUp .3s ease;
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .history-item:hover { background: rgba(56,189,248,.05); }
+    .history-num {
+      font-size: 9px; font-weight: 700;
+      color: var(--text-muted);
+      min-width: 18px; text-align: center;
+    }
+    .history-icon { font-size: 14px; flex-shrink: 0; }
+    .history-content { flex: 1; min-width: 0; }
+    .history-data {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px; font-weight: 600; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .history-meta { font-size: 9px; color: var(--text-muted); margin-top: 1px; }
+    .status-pill {
+      font-size: 8px; font-weight: 700; letter-spacing: .3px;
+      padding: 2px 5px; border-radius: 99px;
+      text-transform: uppercase; flex-shrink: 0;
+    }
+    .status-pill.delivered { background: rgba(74,222,128,.12); color: var(--green); border: 1px solid rgba(74,222,128,.25); }
+    .status-pill.pending { background: rgba(251,146,60,.12); color: var(--orange); border: 1px solid rgba(251,146,60,.25); }
+
+    .empty-history {
+      flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 6px; color: var(--text-muted); font-size: 11px; padding: 16px;
+    }
+    .empty-history-icon { font-size: 24px; opacity: .4; }
+
+    /* ─── OLED SIMULATOR ─── */
+    .oled-panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      backdrop-filter: blur(12px);
+      padding: 8px 12px;
+      display: flex; flex-direction: column; gap: 6px;
+      flex-shrink: 0;
+    }
+    .oled-screen {
+      background: #000;
+      border-radius: 6px;
+      border: 2px solid #1a2a1a;
+      box-shadow: 0 0 10px rgba(74,222,128,.12), inset 0 0 6px rgba(0,0,0,.8);
+      padding: 6px 10px;
+      font-family: 'JetBrains Mono', monospace;
+      min-height: 60px;
+      position: relative;
+      overflow: hidden;
+    }
+    .oled-screen::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: repeating-linear-gradient(
+        0deg, rgba(0,0,0,.15) 0px, rgba(0,0,0,.15) 1px, transparent 1px, transparent 2px
+      );
+      pointer-events: none; z-index: 1;
+    }
+    .oled-line {
+      position: relative; z-index: 2;
+      color: #4ade80;
+      text-shadow: 0 0 6px rgba(74,222,128,.7);
+      white-space: pre;
+      line-height: 1.5;
+    }
+    .oled-line.big { font-size: 16px; font-weight: 700; }
+    .oled-line.small { font-size: 10px; }
+    .oled-line.dim { opacity: .55; }
+    .oled-badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
+      padding: 3px 8px; border-radius: 6px;
+      background: rgba(74,222,128,.1); color: var(--green);
+      border: 1px solid rgba(74,222,128,.25);
+    }
+    .oled-badge.offline { color: var(--red); background: rgba(248,113,113,.1); border-color: rgba(248,113,113,.25); }
+
+    /* ─── BOT STATUS ROW ─── */
+    .bot-status-row {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 11px; color: var(--text-muted);
+      margin-top: 4px;
+      flex-wrap: wrap;
+    }
+    .bot-pill {
+      padding: 3px 9px; border-radius: 99px;
+      font-size: 10px; font-weight: 600;
+      border: 1px solid;
+    }
+    .bot-pill.active  { color: var(--accent);  background: rgba(56,189,248,.08);  border-color: rgba(56,189,248,.25); }
+    .bot-pill.idle    { color: var(--text-muted); background: transparent;          border-color: rgba(107,128,153,.2); }
+    .bot-pill.deliver { color: var(--orange);  background: rgba(251,146,60,.08); border-color: rgba(251,146,60,.25); }
+    .bot-pill.done    { color: var(--green);   background: rgba(74,222,128,.08); border-color: rgba(74,222,128,.25); }
+    .bot-pill.auth    { color: #f59e0b;        background: rgba(245,158,11,.08); border-color: rgba(245,158,11,.3); }
+
+    /* Auth banners ─ compact */
+    .auth-alert {
+      margin: 0 10px 6px;
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      background: rgba(245,158,11,.08);
+      border: 1px solid rgba(245,158,11,.4);
+      display: none; align-items: flex-start; gap: 10px;
+    }
+    .auth-alert.active { display: flex; animation: authPulse 1.6s ease-in-out infinite; }
+    @keyframes authPulse {
+      0%,100% { border-color: rgba(245,158,11,.4); box-shadow: none; }
+      50%      { border-color: rgba(245,158,11,.9); box-shadow: 0 0 14px rgba(245,158,11,.2); }
+    }
+    .auth-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+    .auth-content { flex: 1; }
+    .auth-title { font-size: 10px; font-weight: 800; text-transform: uppercase;
+                  letter-spacing: .5px; color: #f59e0b; margin-bottom: 2px; }
+    .auth-sub   { font-size: 10px; color: var(--text); }
+    .auth-cabin { font-size: 9px; color: var(--text-muted); margin-top: 2px; }
+    .auth-verified {
+      display: none;
+      margin: 0 10px 6px;
+      padding: 7px 12px;
+      border-radius: var(--radius-sm);
+      background: rgba(74,222,128,.08);
+      border: 1px solid rgba(74,222,128,.35);
+      align-items: center; gap: 10px;
+      font-size: 11px; color: var(--green); font-weight: 700;
+      animation: slideIn .4s ease;
+    }
+    .auth-verified.show { display: flex; }
+    .auth-qr-val { font-family: 'JetBrains Mono', monospace; font-size: 10px;
+                   color: var(--green); margin-top: 2px; word-break: break-all; }
+
+    /* ─── MINI CHART / ACTIVITY ─── */
+    .activity-panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      backdrop-filter: blur(12px);
+      padding: 8px 12px;
+      flex-shrink: 0;
+    }
+    .activity-bars {
+      display: flex; align-items: flex-end; gap: 4px;
+      height: 36px; margin-top: 6px;
+    }
+    .activity-bar {
+      flex: 1; border-radius: 3px 3px 0 0;
+      background: linear-gradient(180deg, var(--accent2), var(--accent));
+      opacity: .7;
+      transition: height .5s ease, opacity .3s;
+      min-height: 3px;
+    }
+    .activity-bar:hover { opacity: 1; }
+    .activity-label {
+      font-size: 8px; color: var(--text-muted);
+      display: flex; justify-content: space-between;
+      margin-top: 4px;
+    }
+
+    /* ─── CABIN DIRECTORY ─── */
+    .cabin-panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      backdrop-filter: blur(12px);
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .cabin-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      padding: 8px;
+    }
+    .cabin-card {
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.02);
+      padding: 7px 10px;
+      display: flex; align-items: center; gap: 8px;
+      transition: border-color .3s, box-shadow .3s, background .3s;
+    }
+    .cabin-card.active {
+      border-color: rgba(56,189,248,.6);
+      background: rgba(56,189,248,.08);
+      box-shadow: 0 0 12px rgba(56,189,248,.2);
+    }
+    .cabin-num {
+      width: 26px; height: 26px; flex-shrink: 0;
+      border-radius: 6px;
+      background: rgba(56,189,248,.1);
+      border: 1px solid rgba(56,189,248,.25);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 800; color: var(--accent);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .cabin-card.active .cabin-num {
+      background: var(--accent);
+      color: #000;
+      box-shadow: 0 0 8px rgba(56,189,248,.5);
+    }
+    .cabin-info { min-width: 0; flex: 1; }
+    .cabin-name {
+      font-size: 11px; font-weight: 700; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .cabin-label {
+      font-size: 9px; color: var(--text-muted); margin-top: 1px;
+    }
+    .cabin-card.active .cabin-label { color: var(--accent); }
+
+    /* ─── FOOTER ─── */
+    footer {
+      text-align: center; padding: 6px;
+      font-size: 10px; color: var(--text-muted);
+      border-top: 1px solid var(--border);
+      position: relative; z-index: 1;
+    }
+
+    /* ─── FLASH effect on new QR ─── */
+    @keyframes flashBorder {
+      0% { border-color: var(--green); box-shadow: var(--glow-green); }
+      100% { border-color: var(--border); box-shadow: none; }
+    }
+    .flash-green {
+      animation: flashBorder 1.5s ease forwards;
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; grid-template-rows: auto; }
+      .stats-row { grid-template-columns: repeat(2, 1fr); }
+      .sidebar { display: contents; }
+    }
+
+    /* ─── PERMISSION MODAL ─── */
+    .perm-overlay {
+      position: fixed; inset: 0; z-index: 999;
+      background: rgba(0,0,0,.72);
+      backdrop-filter: blur(10px);
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0; pointer-events: none;
+      transition: opacity .3s ease;
+    }
+    .perm-overlay.show {
+      opacity: 1; pointer-events: all;
+    }
+    .perm-modal {
+      background: linear-gradient(145deg, #0d1726, #111f35);
+      border: 1px solid rgba(245,158,11,.55);
+      border-radius: 22px;
+      padding: 32px 36px;
+      max-width: 440px; width: 92%;
+      box-shadow:
+        0 0 0 1px rgba(245,158,11,.1),
+        0 0 60px rgba(245,158,11,.18),
+        0 24px 60px rgba(0,0,0,.7);
+      animation: modalPop .38s cubic-bezier(.28,1.4,.5,1) forwards;
+    }
+    @keyframes modalPop {
+      from { transform: scale(.82) translateY(20px); opacity: 0; }
+      to   { transform: scale(1)   translateY(0);    opacity: 1; }
+    }
+    .perm-header { text-align: center; margin-bottom: 22px; }
+    .perm-icon {
+      font-size: 52px; display: block; margin-bottom: 12px;
+      animation: iconWiggle 1.2s ease-in-out infinite;
+    }
+    @keyframes iconWiggle {
+      0%,100% { transform: rotate(-4deg) scale(1);   }
+      50%      { transform: rotate(4deg)  scale(1.08); }
+    }
+    .perm-title {
+      font-size: 22px; font-weight: 900; color: #f59e0b;
+      letter-spacing: -.4px; margin-bottom: 6px;
+    }
+    .perm-sub { font-size: 13px; color: var(--text-muted); }
+    .perm-qr-box {
+      background: rgba(0,0,0,.45);
+      border: 1px solid rgba(255,255,255,.07);
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 22px;
+    }
+    .perm-qr-label {
+      font-size: 10px; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: .8px; margin-bottom: 6px;
+      display: flex; align-items: center; gap: 5px;
+    }
+    .perm-qr-data {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 15px; font-weight: 700; color: var(--text);
+      word-break: break-all; line-height: 1.4;
+    }
+    .perm-qr-time { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+    .perm-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .perm-btn {
+      padding: 13px 10px;
+      border-radius: 12px; border: none; cursor: pointer;
+      font-size: 15px; font-weight: 800; letter-spacing: .2px;
+      transition: transform .15s, box-shadow .2s, opacity .2s;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+    }
+    .perm-btn:not(:disabled):hover { transform: translateY(-3px); }
+    .perm-btn:not(:disabled):active { transform: scale(.96); }
+    .perm-btn:disabled { opacity: .6; cursor: default; }
+    .perm-btn.deny {
+      background: linear-gradient(135deg, #7f1d1d, #ef4444);
+      color: #fff;
+      box-shadow: 0 4px 18px rgba(239,68,68,.3);
+    }
+    .perm-btn.deny:not(:disabled):hover  { box-shadow: 0 6px 30px rgba(239,68,68,.5); }
+    .perm-btn.grant {
+      background: linear-gradient(135deg, #14532d, #4ade80);
+      color: #000;
+      box-shadow: 0 4px 18px rgba(74,222,128,.3);
+    }
+    .perm-btn.grant:not(:disabled):hover { box-shadow: 0 6px 30px rgba(74,222,128,.5); }
+    .perm-status {
+      text-align: center; margin-top: 14px;
+      font-size: 13px; font-weight: 600;
+      min-height: 20px;
+      transition: color .3s;
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+
+  <!-- ─── HEADER ─── -->
+  <header>
+    <div class="logo">
+      <div class="logo-icon">🤖</div>
+      <div class="logo-text">Delivery<span>Bot</span></div>
+    </div>
+    <div class="nav-status">
+      <div id="conn-badge" class="offline">
+        <span class="pulse-dot"></span>
+        <span id="conn-text">OFFLINE</span>
+      </div>
+      <div class="nav-time" id="nav-clock">--:--:--</div>
+    </div>
+  </header>
+
+  <!-- ─── MAIN ─── -->
+  <main>
+    <!-- Stats Row -->
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-icon">📦</div>
+        <div class="stat-text">
+          <div class="stat-label">Total Scans</div>
+          <div class="stat-value" id="stat-total">0</div>
+          <div class="stat-sub">Since session start</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">✅</div>
+        <div class="stat-text">
+          <div class="stat-label">Delivered</div>
+          <div class="stat-value" id="stat-delivered" style="color:var(--green)">0</div>
+          <div class="stat-sub">Confirmed packages</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">⏳</div>
+        <div class="stat-text">
+          <div class="stat-label">Pending</div>
+          <div class="stat-value" id="stat-pending" style="color:var(--orange)">0</div>
+          <div class="stat-sub">Awaiting dispatch</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">📡</div>
+        <div class="stat-text">
+          <div class="stat-label">Last Detection</div>
+          <div class="stat-value" id="stat-last" style="color:var(--accent)">--</div>
+          <div class="stat-sub">Real-time detection</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Video Panel -->
+    <div class="video-panel" id="video-panel">
+      <div class="panel-header">
+        <div class="panel-title">
+          <span class="panel-title-icon">📷</span>
+          ESP32 Live Feed
+        </div>
+        <span class="badge">LIVE</span>
+      </div>
+
+      <div class="video-wrap" id="video-wrap">
+        <img id="live-feed" src="/video_feed" alt="ESP32 Live Stream"
+             onerror="showNoFeed()"
+             onload="hidePlaceholder()"/>
+        <div class="video-overlay">
+          <div class="scan-line"></div>
+          <div class="corner corner--tl"></div>
+          <div class="corner corner--tr"></div>
+          <div class="corner corner--bl"></div>
+          <div class="corner corner--br"></div>
+        </div>
+        <div class="no-feed" id="no-feed" style="display:none;">
+          <div class="no-feed-icon">📡</div>
+          <div>Connecting to ESP32 stream…</div>
+          <div style="font-size:11px">Make sure the device is on the same network</div>
+        </div>
+      </div>
+
+      <!-- Detection Alert -->
+      <div class="qr-alert empty" id="qr-alert">
+        <div class="qr-alert-icon">🔍</div>
+        <div class="qr-alert-content">
+          <div class="qr-alert-label">Waiting for QR Code</div>
+          <div class="qr-alert-data" id="qr-data">No detection yet…</div>
+          <div class="qr-alert-time" id="qr-time"></div>
+        </div>
+      </div>
+
+      <!-- QR AUTH ALERT — shown when bot awaits scan –– -->
+      <div class="auth-alert" id="auth-alert">
+        <div class="auth-icon">🔐</div>
+        <div class="auth-content">
+          <div class="auth-title">Authentication Required</div>
+          <div class="auth-sub">Show your QR code to the ESP32 camera to open the cabin</div>
+          <div class="auth-cabin" id="auth-cabin-label"></div>
+        </div>
+      </div>
+
+      <!-- AUTH VERIFIED — shown briefly after scan –– -->
+      <div class="auth-verified" id="auth-verified">
+        <span style="font-size:20px">✅</span>
+        <div>
+          <div>QR Verified! Opening Cabin…</div>
+          <div class="auth-qr-val" id="auth-qr-val"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <!-- OLED Display Simulator -->
+      <div class="oled-panel">
+        <div class="panel-title" style="justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span>🖥️</span> OLED Display
+          </div>
+          <div id="bot-conn-badge" class="oled-badge offline">BOT OFFLINE</div>
+        </div>
+        <div class="oled-screen" id="oled-screen">
+          <div class="oled-line big" id="oled-l1">Waiting...</div>
+          <div class="oled-line small" id="oled-l2"></div>
+          <div class="oled-line small dim" id="oled-l3"></div>
+        </div>
+        <div class="bot-status-row" id="bot-status-row">
+          <span id="bs-cabin">Cabin: –</span>
+          <div id="bs-mode" class="bot-pill idle">IDLE</div>
+          <div id="bs-target" style="display:none" class="bot-pill deliver">→ Cabin –</div>
+        </div>
+      </div>
+
+      <!-- Cabin Directory -->
+      <div class="cabin-panel">
+        <div class="panel-header">
+          <div class="panel-title"><span class="panel-title-icon">🏢</span> Cabin Directory</div>
+          <span class="badge">4 CABINS</span>
+        </div>
+        <div class="cabin-grid">
+          <div class="cabin-card" id="cabin-1">
+            <div class="cabin-num">1</div>
+            <div class="cabin-info">
+              <div class="cabin-name">Allen</div>
+              <div class="cabin-label">Cabin 1</div>
+            </div>
+          </div>
+          <div class="cabin-card" id="cabin-2">
+            <div class="cabin-num">2</div>
+            <div class="cabin-info">
+              <div class="cabin-name">Sam</div>
+              <div class="cabin-label">Cabin 2</div>
+            </div>
+          </div>
+          <div class="cabin-card" id="cabin-3">
+            <div class="cabin-num">3</div>
+            <div class="cabin-info">
+              <div class="cabin-name">Josh</div>
+              <div class="cabin-label">Cabin 3</div>
+            </div>
+          </div>
+          <div class="cabin-card" id="cabin-4">
+            <div class="cabin-num">4</div>
+            <div class="cabin-info">
+              <div class="cabin-name">Nill</div>
+              <div class="cabin-label">Cabin 4</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Activity Chart -->
+      <div class="activity-panel">
+        <div class="panel-title">
+          <span>📊</span> Scan Activity
+        </div>
+        <div class="activity-bars" id="activity-bars">
+          <!-- bars injected by JS -->
+        </div>
+        <div class="activity-label">
+          <span>10 min ago</span><span>Now</span>
+        </div>
+      </div>
+
+      <!-- History Panel -->
+      <div class="history-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span class="panel-title-icon">📋</span>
+            Delivery Log
+          </div>
+          <span class="badge" id="hist-count">0</span>
+        </div>
+        <div class="history-list" id="history-list">
+          <div class="empty-history">
+            <div class="empty-history-icon">📭</div>
+            <div>No deliveries yet</div>
+            <div>Scan a QR to get started</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- All Bot Stats Panel -->
+    <div style="grid-column:1/-1;margin-top:18px;">
+      <details style="background:rgba(13,23,38,0.85);border-radius:10px;padding:10px 14px;">
+        <summary style="font-weight:700;font-size:15px;cursor:pointer;outline:none;">Show All ESP32 Bot Stats</summary>
+        <div id="all-bot-stats" style="margin-top:10px;"></div>
+      </details>
+    </div>
+  </main>
+
+  <footer>
+    DeliveryBot v1.0 &nbsp;·&nbsp; ESP32-CAM &nbsp;·&nbsp; Real-Time QR Detection
+    &nbsp;·&nbsp; &copy; 2026
+  </footer>
+</div>
+
+<!-- ─── PERMISSION MODAL (outside .layout so it overlays everything) ─── -->
+<div class="perm-overlay" id="perm-overlay">
+  <div class="perm-modal">
+    <div class="perm-header">
+      <span class="perm-icon" id="perm-icon">🔐</span>
+      <div class="perm-title">Access Request</div>
+      <div class="perm-sub">New QR code detected — grant cabin access?</div>
+    </div>
+    <div class="perm-qr-box">
+      <div class="perm-qr-label">📷 Detected QR Data</div>
+      <div class="perm-qr-data" id="perm-qr-data">—</div>
+      <div class="perm-qr-time" id="perm-qr-time"></div>
+    </div>
+    <div class="perm-btns">
+      <button class="perm-btn deny" id="btn-deny" onclick="denyAccess()">❌ Deny</button>
+      <button class="perm-btn grant" id="btn-grant" onclick="grantAccess()">✅ Grant Access</button>
+    </div>
+    <div class="perm-status" id="perm-status"></div>
+  </div>
+</div>
+
+<script>
+  // ─── PERMISSION MODAL STATE ───
+  let permVisible = false;
+
+  function showPermModal(qrData, qrTime) {
+    document.getElementById('perm-qr-data').textContent = qrData || '—';
+    document.getElementById('perm-qr-time').textContent = qrTime ? '⏱ Detected at ' + qrTime : '';
+    document.getElementById('perm-status').textContent  = '';
+    document.getElementById('perm-icon').textContent    = '🔐';
+    const gBtn = document.getElementById('btn-grant');
+    const dBtn = document.getElementById('btn-deny');
+    gBtn.textContent = '✅ Grant Access'; gBtn.disabled = false;
+    dBtn.textContent = '❌ Deny';         dBtn.disabled = false;
+    document.getElementById('perm-overlay').classList.add('show');
+    permVisible = true;
+  }
+
+  function hidePermModal() {
+    document.getElementById('perm-overlay').classList.remove('show');
+    permVisible = false;
+  }
+
+  async function grantAccess() {
+    const gBtn = document.getElementById('btn-grant');
+    const dBtn = document.getElementById('btn-deny');
+    const status = document.getElementById('perm-status');
+    gBtn.textContent = '⏳ Granting…'; gBtn.disabled = true; dBtn.disabled = true;
+    status.style.color = 'var(--text-muted)';
+    status.textContent = 'Notifying ESP32 bot…';
+    try {
+      const res  = await fetch('/api/grant_access', { method: 'POST' });
+      const data = await res.json();
+      if (data.status === 'granted') {
+        document.getElementById('perm-icon').textContent = '✅';
+        gBtn.textContent    = '✅ Granted!';
+        status.style.color  = 'var(--green)';
+        status.textContent  = 'Cabin access granted!';
+        setTimeout(hidePermModal, 1800);
+      } else if (data.status === 'bot_offline') {
+        document.getElementById('perm-icon').textContent = '⚠️';
+        status.style.color  = 'var(--orange)';
+        status.textContent  = 'Bot offline — access cleared anyway';
+        gBtn.textContent    = '✅ Grant Access'; gBtn.disabled = false; dBtn.disabled = false;
+        setTimeout(hidePermModal, 2500);
+      } else {
+        status.style.color = 'var(--red)';
+        status.textContent = data.message || 'Failed. Try again.';
+        gBtn.textContent = '✅ Grant Access'; gBtn.disabled = false; dBtn.disabled = false;
+      }
+    } catch(e) {
+      status.style.color = 'var(--red)';
+      status.textContent = 'Network error. Try again.';
+      gBtn.textContent = '✅ Grant Access'; gBtn.disabled = false; dBtn.disabled = false;
+    }
+  }
+
+  async function denyAccess() {
+    const status = document.getElementById('perm-status');
+    status.style.color = 'var(--red)';
+    status.textContent = 'Access denied.';
+    document.getElementById('btn-grant').disabled = true;
+    document.getElementById('btn-deny').disabled  = true;
+    document.getElementById('perm-icon').textContent = '❌';
+    await fetch('/api/deny_access', { method: 'POST' });
+    setTimeout(hidePermModal, 900);
+  }
+
+  // ─── CLOCK ───
+  function updateClock() {
+    const now = new Date();
+    document.getElementById('nav-clock').textContent =
+      now.toLocaleTimeString('en-US', { hour12: false });
+  }
+  updateClock();
+  setInterval(updateClock, 1000);
+
+  // ─── ACTIVITY BARS (rolling 12 buckets) ───
+  const activityData = new Array(12).fill(0);
+  function renderBars() {
+    const container = document.getElementById('activity-bars');
+    const max = Math.max(...activityData, 1);
+    container.innerHTML = activityData.map(v =>
+      `<div class="activity-bar" style="height:${Math.round((v/max)*100)}%"></div>`
+    ).join('');
+  }
+  renderBars();
+
+  // ─── STATE POLLING ───
+  let lastQR = null;
+  let lastTotal = 0;
+  let intervalsAgo = 0;
+  const POLL_MS = 1200;
+
+  async function poll() {
+    try {
+      const res = await fetch('/api/status');
+      if (!res.ok) throw new Error('bad response');
+      const d = await res.json();
+
+      // Connection badge
+      const badge = document.getElementById('conn-badge');
+      const connText = document.getElementById('conn-text');
+      if (d.connected) {
+        badge.className = 'online'; connText.textContent = 'ONLINE';
+        document.getElementById('live-feed').style.display = 'block';
+        document.getElementById('no-feed').style.display = 'none';
+      } else {
+        badge.className = 'offline'; connText.textContent = 'OFFLINE';
+      }
+
+      // Stats
+      document.getElementById('stat-total').textContent = d.total_scans;
+      const history = d.qr_history || [];
+      const delivered = history.filter(x=>x.status==='Delivered').length;
+      const pending = history.filter(x=>x.status==='Pending').length;
+      document.getElementById('stat-delivered').textContent = delivered;
+      document.getElementById('stat-pending').textContent = pending;
+      document.getElementById('stat-last').textContent = d.last_detection_time || '--';
+
+      // New QR detection
+      if (d.latest_qr && d.latest_qr !== lastQR) {
+        lastQR = d.latest_qr;
+        const alert = document.getElementById('qr-alert');
+        alert.className = 'qr-alert flash-green';
+        document.getElementById('qr-data').textContent = d.latest_qr;
+        document.getElementById('qr-time').textContent = '⏱ Detected at ' + (d.last_detection_time || '');
+        document.querySelector('.qr-alert-label').textContent = '✅ QR Code Detected!';
+        document.querySelector('.qr-alert-icon').textContent = '✅';
+
+        // Activity bar bump
+        activityData[activityData.length - 1]++;
+        renderBars();
+      }
+
+      // ── Permission modal visibility ──
+      if (d.qr_pending_approval && d.pending_qr_data) {
+        if (!permVisible) showPermModal(d.pending_qr_data, d.pending_qr_time);
+      } else {
+        if (permVisible) hidePermModal();
+      }
+
+      // Activity bars rolling
+      if (d.total_scans !== lastTotal) {
+        lastTotal = d.total_scans;
+      }
+
+      // History
+      const histCount = document.getElementById('hist-count');
+      histCount.textContent = history.length;
+      const histList = document.getElementById('history-list');
+      if (history.length === 0) {
+        histList.innerHTML = `
+          <div class="empty-history">
+            <div class="empty-history-icon">📭</div>
+            <div>No deliveries yet</div>
+            <div>Scan a QR to get started</div>
+          </div>`;
+      } else {
+        histList.innerHTML = history.map(item => `
+          <div class="history-item">
+            <div class="history-num">#${item.id}</div>
+            <div class="history-icon">📦</div>
+            <div class="history-content">
+              <div class="history-data">${escHtml(item.data)}</div>
+              <div class="history-meta">${item.date} · ${item.time}</div>
+            </div>
+            <div class="status-pill ${item.status.toLowerCase()}">${item.status}</div>
+          </div>
+        `).join('');
+      }
+
+    } catch(e) {
+      const badge = document.getElementById('conn-badge');
+      badge.className = 'offline';
+      document.getElementById('conn-text').textContent = 'OFFLINE';
+    }
+    setTimeout(poll, POLL_MS);
+  }
+
+  // Roll activity buckets every 30s
+  setInterval(() => {
+    activityData.shift();
+    activityData.push(0);
+    renderBars();
+  }, 30000);
+
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;');
+  }
+
+  function showNoFeed() {
+    document.getElementById('live-feed').style.display = 'none';
+    document.getElementById('no-feed').style.display = 'flex';
+  }
+  function hidePlaceholder() {
+    document.getElementById('no-feed').style.display = 'none';
+    document.getElementById('live-feed').style.display = 'block';
+  }
+
+  poll();
+
+  // ─── BOT STATUS POLLING (ESP32 hardware) ───
+  const BOT_POLL_MS = 2000;
+
+  const SCREEN_LABELS = {
+    IDLE:         { l1: 'Following line', size1: 'small' },
+    MENU:         { l1: 'MENU',           size1: 'big' },
+    CABIN_SELECT: { l1: 'SELECT CABIN',   size1: 'big' },
+    LOADING:      { l1: 'Loading...',     size1: 'big' },
+    DELIVERING:   { l1: 'Going to',       size1: 'big' },
+    DELIVERED:    { l1: 'DONE!',          size1: 'big' },
+    RESET_DONE:   { l1: 'RESET DONE',     size1: 'big' },
+    AUTHENTICATE: { l1: 'AUTHENTICATE',   size1: 'big' },
+    AUTH_TIMEOUT: { l1: 'Auth Timeout',   size1: 'small' },
+    OFFLINE:      { l1: 'Bot offline',    size1: 'small' },
+  };
+
+  async function pollBot() {
+    try {
+      const res = await fetch('/api/bot');
+      if (!res.ok) throw new Error('bad');
+      const b = await res.json();
+
+      const isOnline = b.screen !== 'OFFLINE';
+
+      // Badge
+      const botBadge = document.getElementById('bot-conn-badge');
+      botBadge.className = isOnline ? 'oled-badge' : 'oled-badge offline';
+      botBadge.textContent = isOnline ? '● BOT ONLINE' : '● BOT OFFLINE';
+
+      // OLED lines
+      const l1 = document.getElementById('oled-l1');
+      const l2 = document.getElementById('oled-l2');
+      const l3 = document.getElementById('oled-l3');
+      const meta = SCREEN_LABELS[b.screen] || {};
+
+      l1.textContent = b.line1 || (meta.l1 || '');
+      l1.className   = 'oled-line ' + (meta.size1 === 'big' ? 'big' : 'small');
+      l2.textContent = b.line2 || '';
+      l3.textContent = b.line3 || '';
+
+      // Bot status pills
+      const bsCabin  = document.getElementById('bs-cabin');
+      const bsMode   = document.getElementById('bs-mode');
+      const bsTarget = document.getElementById('bs-target');
+
+      bsCabin.textContent = 'Cabin: ' + (b.currentCabin || '–');
+
+      // Highlight active cabin in directory
+      const CABIN_NAMES = { 1:'Allen', 2:'Sam', 3:'Josh', 4:'Nill' };
+      [1,2,3,4].forEach(n => {
+        const el = document.getElementById('cabin-' + n);
+        if (el) el.classList.toggle('active', b.deliveryActive && b.targetCabin === n);
+      });
+
+      if (b.deliveryActive) {
+        const occupant = CABIN_NAMES[b.targetCabin] || '';
+        bsMode.className = 'bot-pill deliver';
+        bsMode.textContent = '🚚 DELIVERING';
+        bsTarget.style.display = 'inline-flex';
+        bsTarget.textContent = '→ Cabin ' + b.targetCabin + (occupant ? ' (' + occupant + ')' : '');
+      } else if (b.delivered && b.screen === 'DELIVERED') {
+        bsMode.className = 'bot-pill done';
+        bsMode.textContent = '✅ DELIVERED';
+        bsTarget.style.display = 'none';
+      } else if (b.awaitingAuth) {
+        bsMode.className = 'bot-pill auth';
+        bsMode.textContent = '🔐 AUTHENTICATING';
+        bsTarget.style.display = 'none';
+      } else if (b.menuActive) {
+        bsMode.className = 'bot-pill active';
+        bsMode.textContent = b.selectCabinMode ? '🎛 SELECT CABIN' : '📋 MENU';
+        bsTarget.style.display = 'none';
+      } else {
+        bsMode.className = 'bot-pill idle';
+        bsMode.textContent = 'IDLE';
+        bsTarget.style.display = 'none';
+      }
+
+      // ── AUTH BANNER LOGIC ── //
+      const authAlert    = document.getElementById('auth-alert');
+      const authVerified = document.getElementById('auth-verified');
+      const authCabinLbl = document.getElementById('auth-cabin-label');
+      const authQrVal    = document.getElementById('auth-qr-val');
+
+      if (b.awaitingAuth && !b.authVerified) {
+        // Waiting for QR scan
+        authAlert.className = 'auth-alert active';
+        authVerified.className = 'auth-verified';
+        authCabinLbl.textContent = 'Target: Cabin ' + b.targetCabin + ' • 30s timeout';
+      } else if (b.authVerified || b.screen === 'DELIVERED') {
+        // Verified!
+        authAlert.className = 'auth-alert';
+        authVerified.className = 'auth-verified show';
+        authQrVal.textContent = b.authQRData || '';
+        // Auto-hide after 4s
+        setTimeout(() => { authVerified.className = 'auth-verified'; }, 4000);
+      } else {
+        // Hidden
+        authAlert.className = 'auth-alert';
+        authVerified.className = 'auth-verified';
+      }
+
+    } catch(e) {
+      const botBadge = document.getElementById('bot-conn-badge');
+      botBadge.className = 'oled-badge offline';
+      botBadge.textContent = '● BOT OFFLINE';
+      document.getElementById('oled-l1').textContent = 'Bot unreachable';
+      document.getElementById('oled-l1').className = 'oled-line small dim';
+      document.getElementById('oled-l2').textContent = '';
+      document.getElementById('oled-l3').textContent = '';
+    }
+    setTimeout(pollBot, BOT_POLL_MS);
+  }
+
+  pollBot();
+  // ─── SHOW ALL BOT STATS ───
+  function renderAllBotStats(botData) {
+    const container = document.getElementById('all-bot-stats');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!botData || typeof botData !== 'object') {
+      container.innerHTML = '<div style="color:var(--red)">No data</div>';
+      return;
+    }
+    const table = document.createElement('table');
+    table.style.width = '100%';
+    table.style.fontSize = '12px';
+    table.style.background = 'rgba(13,23,38,0.85)';
+    table.style.borderRadius = '8px';
+    table.style.marginTop = '10px';
+    table.style.borderCollapse = 'collapse';
+    for (const [key, value] of Object.entries(botData)) {
+      const row = document.createElement('tr');
+      const k = document.createElement('td');
+      k.textContent = key;
+      k.style.fontWeight = 'bold';
+      k.style.padding = '4px 8px';
+      k.style.borderBottom = '1px solid var(--border)';
+      const v = document.createElement('td');
+      v.textContent = (typeof value === 'object') ? JSON.stringify(value) : value;
+      v.style.padding = '4px 8px';
+      v.style.borderBottom = '1px solid var(--border)';
+      row.appendChild(k);
+      row.appendChild(v);
+      table.appendChild(row);
+    }
+    container.appendChild(table);
+  }
+</script>
+</body>
+</html>

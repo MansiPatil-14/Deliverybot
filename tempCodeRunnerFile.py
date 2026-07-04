@@ -1,0 +1,1 @@
+http://10.67.43.124/stream   # ESP32 stream URL
